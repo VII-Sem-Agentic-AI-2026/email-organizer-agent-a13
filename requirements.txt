@@ -1,3 +1,4 @@
 flask
 PyYAML==6.0.2
 tzdata
+langgraph==1.1.7
