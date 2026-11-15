@@ -21,22 +21,82 @@ DAYS_OF_WEEK = {
     "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6
 }
 
+def parse_busy_datetime(dt_val) -> datetime:
+    """
+    Safely converts a datetime or string representation into an aware datetime in LOCAL_TZ or UTC.
+    Handles ISO 8601 strings (with Z or +/- offset), YYYY-MM-DD date strings, and naive datetimes.
+    """
+    if isinstance(dt_val, datetime):
+        if dt_val.tzinfo is None:
+            return dt_val.replace(tzinfo=LOCAL_TZ)
+        return dt_val
+    if not isinstance(dt_val, str):
+        dt_val = str(dt_val)
+    clean = dt_val.strip()
+    if len(clean) == 10 and clean.count("-") == 2:
+        try:
+            d = datetime.strptime(clean, "%Y-%m-%d").date()
+            return datetime.combine(d, time(0, 0)).replace(tzinfo=LOCAL_TZ)
+        except ValueError:
+            pass
+    clean = clean.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(clean)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=LOCAL_TZ)
+        return dt
+    except Exception:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %I:%M %p"):
+            try:
+                return datetime.strptime(clean, fmt).replace(tzinfo=LOCAL_TZ)
+            except ValueError:
+                pass
+        return datetime.now(LOCAL_TZ)
+
+
 def resolve_datetime(day_str, time_str, reference_date=None):
     if reference_date is None:
         reference_date = datetime.now().date()
         
-    target_weekday = DAYS_OF_WEEK.get(day_str.lower(), reference_date.weekday())
-    days_ahead = target_weekday - reference_date.weekday()
-    if days_ahead < 0 or (days_ahead == 0 and day_str.lower() in DAYS_OF_WEEK):
-        # We assume if they mention a weekday it is usually in the future
-        # e.g., if today is Friday, and they say Friday, they probably mean next Friday.
-        # But for tests we'll just advance to next week if days_ahead < 0. If 0, let's keep it today.
-        if days_ahead < 0:
-            days_ahead += 7
-            
-    resolved_date = reference_date + timedelta(days=days_ahead)
+    clean_day = day_str.lower().strip() if day_str else ""
     
-    match = re.match(r"(\d+)(?::(\d+))?\s*(am|pm)?", time_str.lower())
+    if clean_day == "today":
+        resolved_date = reference_date
+    elif clean_day == "tomorrow":
+        resolved_date = reference_date + timedelta(days=1)
+    elif clean_day.count("-") == 2:
+        try:
+            resolved_date = datetime.strptime(clean_day, "%Y-%m-%d").date()
+        except ValueError:
+            resolved_date = reference_date
+    elif clean_day in DAYS_OF_WEEK:
+        target_weekday = DAYS_OF_WEEK[clean_day]
+        days_ahead = target_weekday - reference_date.weekday()
+        if days_ahead < 0 or (days_ahead == 0 and clean_day in DAYS_OF_WEEK):
+            if days_ahead < 0:
+                days_ahead += 7
+        resolved_date = reference_date + timedelta(days=days_ahead)
+    else:
+        # Try date parsing like "Nov 16" or "16 Nov"
+        parsed = False
+        for fmt in ("%b %d", "%B %d", "%d %b", "%d %B"):
+            try:
+                p_dt = datetime.strptime(clean_day, fmt)
+                resolved_date = p_dt.replace(year=reference_date.year).date()
+                if resolved_date < reference_date:
+                    resolved_date = resolved_date.replace(year=reference_date.year + 1)
+                parsed = True
+                break
+            except ValueError:
+                pass
+        if not parsed:
+            target_weekday = DAYS_OF_WEEK.get(clean_day, reference_date.weekday())
+            days_ahead = target_weekday - reference_date.weekday()
+            if days_ahead < 0:
+                days_ahead += 7
+            resolved_date = reference_date + timedelta(days=days_ahead)
+    
+    match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", time_str.lower() if time_str else "")
     if match:
         hour = int(match.group(1))
         minute = int(match.group(2)) if match.group(2) else 0
@@ -58,9 +118,13 @@ def overlaps(
     busy_start,
     busy_end
 ):
+    s_start = parse_busy_datetime(slot_start)
+    s_end = parse_busy_datetime(slot_end)
+    b_start = parse_busy_datetime(busy_start)
+    b_end = parse_busy_datetime(busy_end)
     return (
-        slot_start < busy_end
-        and slot_end > busy_start
+        s_start < b_end
+        and s_end > b_start
     )
 
 def find_available_slots(
@@ -108,20 +172,11 @@ def find_available_slots(
             is_busy = False
 
             for busy in busy_periods:
-
-                busy_start = datetime.fromisoformat(
-                    busy["start"].replace("Z", "+00:00")
-                )
-
-                busy_end = datetime.fromisoformat(
-                    busy["end"].replace("Z", "+00:00")
-                )
-
                 if overlaps(
                     current_time,
                     slot_end,
-                    busy_start,
-                    busy_end
+                    busy.get("start"),
+                    busy.get("end")
                 ):
                     is_busy = True
                     break
@@ -168,20 +223,21 @@ def propose_meeting_slots_with_preference(
 
     requested_slot = None
     requested_status = None
+    now_dt = datetime.now(LOCAL_TZ)
 
     if proposed_date_str and proposed_time_str:
         requested_dt = resolve_datetime(proposed_date_str, proposed_time_str, start_date)
         req_end = requested_dt + timedelta(minutes=duration_minutes)
 
         is_busy = False
-        for busy in busy_periods:
-            busy_start = datetime.fromisoformat(busy["start"].replace("Z", "+00:00"))
-            busy_end = datetime.fromisoformat(busy["end"].replace("Z", "+00:00"))
-
-            # Native aware datetime comparison works perfectly
-            if overlaps(requested_dt, req_end, busy_start, busy_end):
-                is_busy = True
-                break
+        # If requested slot is already in the past, treat as unavailable
+        if requested_dt < now_dt:
+            is_busy = True
+        else:
+            for busy in busy_periods:
+                if overlaps(requested_dt, req_end, busy.get("start"), busy.get("end")):
+                    is_busy = True
+                    break
 
         requested_slot = ProposedSlot(start=requested_dt, end=req_end)
         requested_status = "BUSY" if is_busy else "AVAILABLE"
@@ -210,16 +266,18 @@ def propose_meeting_slots_with_preference(
         while current_time + timedelta(minutes=duration_minutes) <= work_end:
             slot_end = current_time + timedelta(minutes=duration_minutes)
 
+            # Skip past slots if looking at today
+            if current_time < now_dt:
+                current_time += timedelta(minutes=30)
+                continue
+
             if requested_slot and current_time == requested_slot.start:
                 current_time += timedelta(minutes=30)
                 continue
 
             is_busy = False
             for busy in busy_periods:
-                busy_start = datetime.fromisoformat(busy["start"].replace("Z", "+00:00"))
-                busy_end = datetime.fromisoformat(busy["end"].replace("Z", "+00:00"))
-
-                if overlaps(current_time, slot_end, busy_start, busy_end):
+                if overlaps(current_time, slot_end, busy.get("start"), busy.get("end")):
                     is_busy = True
                     break
 

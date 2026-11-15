@@ -8,6 +8,7 @@ from tools import read_inbox
 from retry import retry_operation
 from classifier import classify_email_safe, extract_action_items_safe
 from memory import get_grounding_context
+from reminder_manager import ReminderManager
 
 
 # Public state returned to existing project code.
@@ -19,6 +20,7 @@ class GraphState:
     triage_draft: list = field(default_factory=list)
     validation_passed: bool = False
     errors: list = field(default_factory=list)
+    reminders: list = field(default_factory=list)
 
 
 # State maintained by LangGraph.
@@ -30,6 +32,7 @@ class GraphData(TypedDict):
     validation_passed: bool
     errors: list
     attempts: int
+    reminders: list
 
 
 def to_graph_state(data: dict) -> GraphState:
@@ -40,6 +43,7 @@ def to_graph_state(data: dict) -> GraphState:
         triage_draft=data.get("triage_draft", []),
         validation_passed=data.get("validation_passed", False),
         errors=data.get("errors", []),
+        reminders=data.get("reminders", []),
     )
 
 
@@ -61,6 +65,34 @@ def classify_emails(state: GraphState) -> GraphState:
             "priority": classification.priority,
         })
 
+    return state
+
+
+def schedule_reminders(state: GraphState, reminder_manager: ReminderManager = None) -> GraphState:
+    """
+    Deterministic LangGraph processing component that schedules persistent reminders
+    for High and Critical priority emails right after classification.
+    Zero LLM calls are made here.
+    """
+    if reminder_manager is None:
+        reminder_manager = ReminderManager()
+
+    scheduled = []
+    for email, classification in zip(state.emails, state.classifications):
+        priority = classification.get("priority", "Low")
+        if priority.capitalize() in ("Critical", "High"):
+            email_id = getattr(email, "message_id", None) or f"{email.sender}_{email.subject}"
+            reminder = reminder_manager.create_reminder(
+                email_id=email_id,
+                sender=email.sender,
+                subject=email.subject,
+                body=email.body,
+                priority=priority
+            )
+            if reminder:
+                scheduled.append(reminder.to_dict())
+
+    state.reminders = scheduled
     return state
 
 
@@ -149,6 +181,7 @@ def regenerate_triage(state: GraphState) -> GraphState:
     print("\nRegenerating failed triage...")
 
     state = classify_emails(state)
+    state = schedule_reminders(state)
     state = create_triage_draft(state)
     return state
 
@@ -166,6 +199,12 @@ def classify_node(data: GraphData) -> dict:
     state = to_graph_state(data)
     state = classify_emails(state)
     return {"classifications": state.classifications}
+
+
+def schedule_reminders_node(data: GraphData) -> dict:
+    state = to_graph_state(data)
+    state = schedule_reminders(state)
+    return {"reminders": state.reminders}
 
 
 def extract_actions_node(data: GraphData) -> dict:
@@ -227,6 +266,7 @@ def build_graph():
 
     workflow.add_node("ingest", ingest_node)
     workflow.add_node("classify", classify_node)
+    workflow.add_node("schedule_reminders", schedule_reminders_node)
     workflow.add_node("extract_actions", extract_actions_node)
     workflow.add_node("create_draft", create_draft_node)
     workflow.add_node("ground", ground_node)
@@ -235,7 +275,8 @@ def build_graph():
 
     workflow.add_edge(START, "ingest")
     workflow.add_edge("ingest", "classify")
-    workflow.add_edge("classify", "extract_actions")
+    workflow.add_edge("classify", "schedule_reminders")
+    workflow.add_edge("schedule_reminders", "extract_actions")
     workflow.add_edge("extract_actions", "create_draft")
     workflow.add_edge("create_draft", "ground")
     workflow.add_edge("ground", "validate")
@@ -265,6 +306,7 @@ def run_graph() -> GraphState:
         "validation_passed": False,
         "errors": [],
         "attempts": 0,
+        "reminders": [],
     }
 
     result = build_graph().invoke(initial_state)

@@ -282,6 +282,7 @@ button {
 .badge.rejected { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
 .badge.sent { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
 .badge.pending { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+.badge.snoozed { background: rgba(168, 85, 247, 0.25); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4); }
 .badge.completed { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
 
 .item-actions {
@@ -359,3 +360,81 @@ button {
     font-size: 0.8rem;
     color: #cbd5e1;
 }
+
+.meeting-confirmed-banner {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #6ee7b7;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Reminder Notification Banner / Toast */
+.reminder-banner-container {
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.reminder-alert-card {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(185, 28, 28, 0.15));
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-left: 5px solid #ef4444;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 8px 24px rgba(239, 68, 68, 0.2);
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.reminder-alert-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.reminder-alert-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #fca5a5;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.reminder-alert-body {
+    font-size: 0.95rem;
+    color: #f1f5f9;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.reminder-alert-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.snooze-dropdown-btn {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.snooze-dropdown-btn:hover {
+    background: rgba(245, 158, 11, 0.35);
+}
+

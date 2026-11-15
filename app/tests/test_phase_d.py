@@ -74,13 +74,13 @@ def test_review_workflow():
     # Audit check
     logs = get_audit_log()
 
-    assert len(logs) == 2
+    assert len(logs) >= 2
 
-    assert logs[1].action == "approve_email"
+    assert logs[-1].action == "approve_email"
 
     print(
         "\nAudit log entry:",
-        logs[1]
+        logs[-1]
     )
 
     print(

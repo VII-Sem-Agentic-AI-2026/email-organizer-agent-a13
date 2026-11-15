@@ -77,13 +77,30 @@ def test_f3_action_items():
     service.complete_task("task-1", confirmed=True)
     assert service.tasks["task-1"].status == "completed"
 
-def test_f4_meeting_requests():
+def test_f4_meeting_requests(monkeypatch):
     # F4: meeting request appears, available slots can be displayed, confirmation without approval is rejected
     service = DashboardService()
+    from types import SimpleNamespace
+    from gmail_sender import GmailSender
+
+    service.gmail_connector = SimpleNamespace(service=object())
+    sent_emails = []
+
+    def fake_send(self, recipient, subject, body):
+        sent_emails.append({
+            "recipient": recipient,
+            "subject": subject,
+            "body": body,
+        })
+
+    monkeypatch.setattr(GmailSender, "send", fake_send)
+
     # Mock meeting
     from meeting_agent import MeetingRequest
     req = MeetingRequest(True, "Monday", "10 am", "Meeting")
     req.id = "meet-1"
+    req.sender = "researcher@university.edu"
+    req.subject = "Research Meeting"
     req.available_slots = ["Slot 1"]
     req.status = "pending"
     service.meetings[req.id] = req
@@ -95,6 +112,38 @@ def test_f4_meeting_requests():
     # Confirmation works
     service.confirm_meeting("meet-1", "Slot 1", approved=True)
     assert service.meetings["meet-1"].status == "approved"
+    assert sent_emails == [{
+        "recipient": "researcher@university.edu",
+        "subject": "Meeting confirmation: Research Meeting",
+        "body": (
+            "Your meeting request has been approved.\n\n"
+            "Confirmed time: Slot 1\n\n"
+            "We look forward to meeting with you."
+        ),
+    }]
+
+def test_meeting_stays_pending_when_confirmation_email_fails(monkeypatch):
+    service = DashboardService()
+    from types import SimpleNamespace
+    from gmail_sender import GmailSender
+    from meeting_agent import MeetingRequest
+
+    service.gmail_connector = SimpleNamespace(service=object())
+    req = MeetingRequest(True, "Monday", "10 am", "Meeting")
+    req.id = "meet-fail"
+    req.sender = "researcher@university.edu"
+    req.subject = "Research Meeting"
+    req.status = "pending"
+    service.meetings[req.id] = req
+
+    def fail_send(self, recipient, subject, body):
+        raise RuntimeError("Gmail send failed")
+
+    monkeypatch.setattr(GmailSender, "send", fail_send)
+
+    with pytest.raises(RuntimeError, match="Gmail send failed"):
+        service.confirm_meeting("meet-fail", "2026-10-28 10:00 AM", approved=True)
+    assert req.status == "pending"
 
 def test_f5_follow_ups():
     # F5: follow-up appears, due status is calculated correctly

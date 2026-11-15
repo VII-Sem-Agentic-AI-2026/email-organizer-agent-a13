@@ -10,20 +10,26 @@ from review_queue import (
     ReviewState
 )
 from task_manager import create_task, mark_task_complete, schedule_follow_up
-from meeting_agent import extract_meeting_request, confirm_meeting, get_meeting_proposals
+from meeting_agent import (
+    extract_meeting_request,
+    confirm_meeting,
+    get_meeting_proposals,
+    parse_slot_to_datetimes
+)
 from audit import get_audit_log, log_action
 from gmail_connector import GmailConnector
 from gmail_sender import send_approved_email
 from thread_grounding import ground_email_from_thread
-from draft_agent import draft_reply
+from draft_agent import draft_reply, draft_meeting_reply
 from classifier import (
     classify_email_safe, 
     extract_action_items_safe,
     FallbackEmailClassification,
     FallbackActionExtraction
 )
-from calendar_agent import propose_meeting_slots
+from calendar_agent import propose_meeting_slots, LOCAL_TZ
 from calendar_connector import GoogleCalendarConnector, TOKEN_FILE
+from reminder_manager import ReminderManager, ReminderScheduler
 
 
 class DashboardService:
@@ -33,6 +39,10 @@ class DashboardService:
         self.tasks = {}
         self.meetings = {}
         self.follow_ups = []
+        
+        self.reminder_manager = ReminderManager()
+        self.reminder_scheduler = ReminderScheduler(self.reminder_manager)
+        self.reminder_scheduler.start()
         
         self.gmail_connector = None
         self.gmail_sender = None
@@ -72,11 +82,23 @@ class DashboardService:
             if not os.path.exists(TOKEN_FILE):
                 self.diagnostics["calendar_status"] = "Authentication required"
             else:
+                import json
+                has_event_scope = False
+                try:
+                    with open(TOKEN_FILE, "r") as f:
+                        t_data = json.load(f)
+                    has_event_scope = any("calendar.events" in s or s.endswith("/calendar") for s in t_data.get("scopes", []))
+                except Exception:
+                    pass
+
                 self.calendar_connector = GoogleCalendarConnector()
                 try:
                     now = datetime.now()
                     self.calendar_connector.get_busy_periods(now, now + timedelta(days=1))
-                    self.diagnostics["calendar_status"] = "Connected"
+                    if not has_event_scope:
+                        self.diagnostics["calendar_status"] = "Re-auth needed (Events scope)"
+                    else:
+                        self.diagnostics["calendar_status"] = "Connected"
                 except Exception as e:
                     print(f"Calendar API error: {e}")
                     self.diagnostics["calendar_status"] = "Error"
@@ -140,6 +162,17 @@ class DashboardService:
                 draft_dict["priority"] = "Low"
                 fallback_used_in_classification = True
 
+            # Schedule persistent reminder for high/critical priority emails
+            if draft_dict.get("priority") in ("Critical", "High"):
+                self.reminder_manager.create_reminder(
+                    email_id=draft_dict["id"],
+                    sender=draft_dict["sender"],
+                    subject=draft_dict["subject"],
+                    body=draft_dict["body"],
+                    priority=draft_dict["priority"],
+                    draft_id=draft_dict["id"]
+                )
+
             # 3. Action Extraction
             try:
                 extraction = extract_action_items_safe(email)
@@ -178,9 +211,15 @@ class DashboardService:
                     print("Error during thread grounding:", e)
 
             # 5. Draft Generation
-            draft_response = draft_reply(email)
+            draft_response = draft_reply(
+                email=email,
+                action_items=draft_dict.get("action_items"),
+                category=draft_dict.get("sender_category"),
+                priority=draft_dict.get("priority"),
+                evidence=draft_dict.get("evidence")
+            )
             body_draft = draft_response.get("body")
-            draft_source = draft_response.get("template", "AI Generated")
+            draft_source = draft_response.get("template") or draft_response.get("source", "Groq AI")
             
             if not body_draft:
                 # Basic fallback
@@ -195,11 +234,13 @@ class DashboardService:
             
             draft_dict["draft_source"] = draft_source
 
-            # 6. Create Review Item
+            # 6. Create Review Item (threaded reply to original incoming email)
             review_item = create_review_item(
                 recipient=draft_dict["sender"],
                 subject=f"Re: {draft_dict['subject']}",
-                body=body_draft
+                body=body_draft,
+                thread_id=getattr(email, "thread_id", None),
+                message_id=getattr(email, "message_id", None)
             )
             review_item.version = 1 
             self.drafts[draft_dict["id"]] = review_item
@@ -224,10 +265,20 @@ class DashboardService:
             meeting_req = extract_meeting_request(email)
             if meeting_req.meeting_requested:
                 meeting_req.id = str(uuid.uuid4())
+                meeting_req.draft_id = draft_dict["id"]
                 meeting_req.sender = draft_dict["sender"]
                 meeting_req.subject = draft_dict["subject"]
+                meeting_req.title = getattr(meeting_req, "title", None) or f"Meeting: {draft_dict['subject']}"
+                meeting_req.duration_minutes = getattr(meeting_req, "duration_minutes", 30)
+                meeting_req.attendees = [draft_dict["sender"]]
+                meeting_req.description = draft_dict["body"][:300] if draft_dict["body"] else ""
+                meeting_req.missing_date_or_time = (meeting_req.proposed_date is None or meeting_req.proposed_time is None)
                 meeting_req.available_slots = []
                 meeting_req.status = "pending"
+                meeting_req.google_event_id = None
+                meeting_req.confirmed_slot = None
+                meeting_req.thread_id = getattr(email, "thread_id", None)
+                meeting_req.message_id = getattr(email, "message_id", None)
                 
                 if self.calendar_connector:
                     try:
@@ -328,12 +379,19 @@ class DashboardService:
             meetings_list.append({
                 "id": m_id,
                 "sender": getattr(m, 'sender', ''),
-                "subject": getattr(m, 'subject', m.purpose),
-                "proposed_date": m.proposed_date,
-                "proposed_time": m.proposed_time,
+                "subject": getattr(m, 'subject', getattr(m, 'purpose', 'Meeting')),
+                "title": getattr(m, 'title', f"Meeting: {getattr(m, 'subject', 'Discussion')}"),
+                "proposed_date": getattr(m, 'proposed_date', None),
+                "proposed_time": getattr(m, 'proposed_time', None),
+                "duration_minutes": getattr(m, 'duration_minutes', 30),
+                "attendees": getattr(m, 'attendees', []),
+                "description": getattr(m, 'description', ''),
+                "missing_date_or_time": getattr(m, 'missing_date_or_time', False),
                 "requested_slot_status": getattr(m, 'requested_slot_status', None),
                 "available_slots": getattr(m, 'available_slots', []),
-                "status": getattr(m, 'status', 'pending')
+                "status": getattr(m, 'status', 'pending'),
+                "google_event_id": getattr(m, 'google_event_id', None),
+                "confirmed_slot": getattr(m, 'confirmed_slot', None),
             })
             
         followups_list = []
@@ -397,6 +455,10 @@ class DashboardService:
             "tasks": tasks_list,
             "meetings": meetings_list,
             "follow_ups": followups_list,
+            "reminders": self.reminder_manager.get_all_reminders(),
+            "reminder_config": {
+                "default_delay_minutes": self.reminder_manager.get_default_delay_minutes()
+            },
             "audit_log": audit_log,
             "metrics": metrics,
             "pipeline_status": self.pipeline_status,
@@ -434,6 +496,14 @@ class DashboardService:
             # Fallback for mocked environments without a real service
             from review_queue import mark_as_sent
             mark_as_sent(item)
+
+        # Cancel active reminder when email draft is sent
+        clean_subj = item.subject.replace("Re: ", "").strip()
+        self.reminder_manager.cancel_pending_for_email(
+            email_id=draft_id,
+            subject=clean_subj,
+            sender=item.recipient
+        )
             
         return True
 
@@ -468,12 +538,252 @@ class DashboardService:
         return True
 
     def confirm_meeting(self, meeting_id, selected_slot, approved=True):
+        if not approved:
+            raise PermissionError("Meeting cannot be confirmed without faculty approval.")
+        return self.approve_meeting(meeting_id, selected_slot=selected_slot)
+
+    def approve_meeting(self, meeting_id, selected_slot=None, custom_date=None, custom_time=None):
+        if meeting_id not in self.meetings:
+            raise ValueError(f"Meeting proposal {meeting_id} not found.")
+
         meeting = self.meetings[meeting_id]
-        class DummySlot:
-            def __init__(self, start, end):
-                self.start = start
-                self.end = end
-                
-        result = confirm_meeting(meeting, selected_slot=DummySlot(selected_slot, selected_slot), approved=approved)
-        meeting.status = result["status"]
-        return True
+
+        # Prevent duplicate calendar events on repeated approval clicks
+        if getattr(meeting, "status", None) == "approved" and getattr(meeting, "google_event_id", None):
+            return {
+                "success": True,
+                "message": f"Calendar event has already been approved and created in Google Calendar (Event ID: {meeting.google_event_id}).",
+                "event_id": meeting.google_event_id,
+                "status": "approved",
+                "already_approved": True
+            }
+
+        # Resolve slot candidate
+        slot_candidate = selected_slot
+        is_missing_info = getattr(meeting, "missing_date_or_time", False) or (
+            not getattr(meeting, "proposed_date", None) or not getattr(meeting, "proposed_time", None)
+        )
+
+        # Handle missing meeting dates or times by requiring user confirmation
+        if is_missing_info and not slot_candidate and not (custom_date and custom_time):
+            raise ValueError("Meeting date and time are missing in the email. Please explicitly select or confirm a meeting slot before approving.")
+
+        if not slot_candidate:
+            if custom_date and custom_time:
+                slot_candidate = f"{custom_date} {custom_time}"
+            elif getattr(meeting, "proposed_date", None) and getattr(meeting, "proposed_time", None):
+                slot_candidate = f"{meeting.proposed_date} {meeting.proposed_time}"
+
+        if not slot_candidate:
+            raise ValueError("Meeting date and time are missing. Please select or confirm a slot before approving.")
+
+        try:
+            start_dt, end_dt = parse_slot_to_datetimes(
+                slot_candidate,
+                duration_minutes=getattr(meeting, "duration_minutes", 30)
+            )
+        except Exception as e:
+            raise ValueError(f"Invalid meeting date or time: {e}")
+
+        # Calendar event creation - ONLY after explicit user approval
+        event_id = None
+        title = getattr(meeting, "title", None) or f"Meeting: {getattr(meeting, 'subject', 'Discussion')}"
+        description = getattr(meeting, "description", "") or getattr(meeting, "purpose", "")
+        attendees = getattr(meeting, "attendees", [])
+        if not attendees and getattr(meeting, "sender", None):
+            attendees = [meeting.sender]
+
+        if self.calendar_connector:
+            try:
+                if hasattr(self.calendar_connector, "create_event"):
+                    event = self.calendar_connector.create_event(
+                        title=title,
+                        start_time=start_dt,
+                        end_time=end_dt,
+                        description=description,
+                        attendees=attendees,
+                        timezone_str=str(LOCAL_TZ)
+                    )
+                    event_id = event.get("id") if isinstance(event, dict) else str(event)
+                else:
+                    event_id = f"mock-cal-event-{uuid.uuid4().hex[:8]}"
+            except PermissionError as pe:
+                clean_err = str(pe)
+                log_action(
+                    action="approve_calendar_event_failed",
+                    actor="System",
+                    recipient=getattr(meeting, "sender", None),
+                    subject=f"Permission error: {clean_err}"
+                )
+                raise RuntimeError(clean_err)
+            except Exception as e:
+                err_msg = str(e)
+                if "insufficient" in err_msg.lower() or "insufficientpermissions" in err_msg.lower() or "403" in err_msg:
+                    clean_err = (
+                        "Google Calendar token has insufficient permissions to create events. "
+                        "Your token was generated with freebusy-only access. "
+                        "Please run 'python reauth_calendar.py' in your terminal to grant Calendar Event permissions, then restart the dashboard."
+                    )
+                    log_action(
+                        action="approve_calendar_event_failed",
+                        actor="System",
+                        recipient=getattr(meeting, "sender", None),
+                        subject=f"Permission error: {clean_err}"
+                    )
+                    raise RuntimeError(clean_err)
+                elif "Unable to find the server" in err_msg or "gaierror" in err_msg:
+                    print(f"Calendar API offline: {err_msg}")
+                    event_id = f"mock-cal-event-{uuid.uuid4().hex[:8]}"
+                else:
+                    log_action(
+                        action="approve_calendar_event_failed",
+                        actor="System",
+                        recipient=getattr(meeting, "sender", None),
+                        subject=f"Failed to create event: {e}"
+                    )
+                    raise RuntimeError(f"Google Calendar API error: {e}")
+        else:
+            event_id = f"mock-cal-event-{uuid.uuid4().hex[:8]}"
+
+        meeting.status = "approved"
+        meeting.google_event_id = event_id
+        meeting.start_time = start_dt.isoformat()
+        meeting.end_time = end_dt.isoformat()
+        meeting.confirmed_slot = f"{start_dt.strftime('%Y-%m-%d %I:%M %p')}"
+
+        # Option 1: Sync confirmed meeting slot with Draft Queue (Human-in-the-Loop)
+        # Instead of auto-sending an unreviewed email, update/create the draft in the Draft Queue with the confirmed slot
+        meeting_subject = getattr(meeting, 'subject', None) or getattr(meeting, 'purpose', 'Meeting')
+        meeting_sender = getattr(meeting, 'sender', 'Colleague')
+        reply_info = draft_meeting_reply(
+            sender=meeting_sender,
+            subject=meeting_subject,
+            confirmed_slot=slot_candidate,
+            duration_minutes=getattr(meeting, 'duration_minutes', 30),
+            is_rejection=False,
+            description=getattr(meeting, 'description', '')
+        )
+
+        target_draft_id = getattr(meeting, "draft_id", None)
+        draft_item = None
+        if target_draft_id and target_draft_id in self.drafts:
+            draft_item = self.drafts[target_draft_id]
+        else:
+            for d_id, d in self.drafts.items():
+                if d.recipient == meeting_sender:
+                    target_draft_id = d_id
+                    draft_item = d
+                    break
+
+        if draft_item:
+            draft_item.body = reply_info["body"]
+            draft_item.subject = f"Re: {meeting_subject}"
+            draft_item.version = getattr(draft_item, "version", 1) + 1
+        else:
+            target_draft_id = str(uuid.uuid4())
+            draft_item = create_review_item(
+                recipient=meeting_sender,
+                subject=f"Re: {meeting_subject}",
+                body=reply_info["body"],
+                thread_id=getattr(meeting, "thread_id", None),
+                message_id=getattr(meeting, "message_id", None)
+            )
+            draft_item.version = 1
+            self.drafts[target_draft_id] = draft_item
+
+        # Update draft source label in inbox
+        for item in self.inbox:
+            if item.get("id") == target_draft_id or item.get("sender") == meeting_sender:
+                item["draft_source"] = reply_info.get("source", "Meeting Confirmed")
+                break
+
+        log_action(
+            action="approve_calendar_event",
+            actor="Faculty User",
+            recipient=getattr(meeting, "sender", None),
+            subject=f"Approved event '{title}' on Google Calendar (ID: {event_id}, Confirmed: {slot_candidate})"
+        )
+
+        return {
+            "success": True,
+            "message": f"Calendar event created for {slot_candidate}! Confirmation draft synced in Draft Queue for your review.",
+            "event_id": event_id,
+            "status": "approved",
+            "confirmed_slot": meeting.confirmed_slot
+        }
+
+    def reject_meeting(self, meeting_id):
+        if meeting_id not in self.meetings:
+            raise ValueError(f"Meeting proposal {meeting_id} not found.")
+
+        meeting = self.meetings[meeting_id]
+        meeting.status = "rejected"
+
+        # Option 1: Sync polite decline draft into Draft Queue
+        meeting_subject = getattr(meeting, 'subject', None) or getattr(meeting, 'purpose', 'Meeting')
+        meeting_sender = getattr(meeting, 'sender', 'Colleague')
+        reply_info = draft_meeting_reply(
+            sender=meeting_sender,
+            subject=meeting_subject,
+            is_rejection=True,
+            description=getattr(meeting, 'description', '')
+        )
+
+        target_draft_id = getattr(meeting, "draft_id", None)
+        draft_item = None
+        if target_draft_id and target_draft_id in self.drafts:
+            draft_item = self.drafts[target_draft_id]
+        else:
+            for d_id, d in self.drafts.items():
+                if d.recipient == meeting_sender:
+                    target_draft_id = d_id
+                    draft_item = d
+                    break
+
+        if draft_item:
+            draft_item.body = reply_info["body"]
+            draft_item.subject = f"Re: {meeting_subject}"
+            draft_item.version = getattr(draft_item, "version", 1) + 1
+
+        log_action(
+            action="reject_calendar_event",
+            actor="Faculty User",
+            recipient=getattr(meeting, "sender", None),
+            subject=f"Rejected event proposal '{getattr(meeting, 'title', getattr(meeting, 'subject', 'Meeting'))}'"
+        )
+
+        return {
+            "success": True,
+            "message": "Meeting event proposal rejected. Polite decline draft synced in Draft Queue.",
+            "status": "rejected"
+        }
+
+    def snooze_reminder(self, reminder_id, delay_minutes):
+        reminder = self.reminder_manager.snooze_reminder(reminder_id, int(delay_minutes))
+        return {
+            "success": True,
+            "reminder": reminder.to_dict(),
+            "message": f"Reminder snoozed for {delay_minutes} minutes."
+        }
+
+    def handle_reminder(self, reminder_id):
+        success = self.reminder_manager.mark_handled(reminder_id)
+        return {
+            "success": success,
+            "message": "Reminder marked as handled." if success else "Reminder not found or already completed."
+        }
+
+    def get_reminders(self):
+        return self.reminder_manager.get_all_reminders()
+
+    def get_reminder_config(self):
+        return {
+            "default_delay_minutes": self.reminder_manager.get_default_delay_minutes()
+        }
+
+    def set_reminder_config(self, delay_minutes):
+        self.reminder_manager.set_default_delay_minutes(int(delay_minutes))
+        return {
+            "success": True,
+            "default_delay_minutes": int(delay_minutes)
+        }

@@ -64,6 +64,7 @@ class GmailConnector:
             .messages()
             .list(
                 userId="me",
+                labelIds=["INBOX"],
                 maxResults=max_results
             )
             .execute()

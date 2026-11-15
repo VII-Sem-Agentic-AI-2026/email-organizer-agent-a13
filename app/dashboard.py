@@ -81,10 +81,70 @@ def complete_followup(followup_id):
 
 @app.route("/api/meetings/<meeting_id>/confirm", methods=["POST"])
 def confirm_meeting(meeting_id):
-    data = request.json
+    data = request.json or {}
     try:
         service.confirm_meeting(meeting_id, data.get("slot"), approved=True)
         return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/meetings/<meeting_id>/approve", methods=["POST"])
+def approve_meeting(meeting_id):
+    data = request.json or {}
+    try:
+        result = service.approve_meeting(
+            meeting_id,
+            selected_slot=data.get("slot"),
+            custom_date=data.get("custom_date"),
+            custom_time=data.get("custom_time")
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/meetings/<meeting_id>/reject", methods=["POST"])
+def reject_meeting(meeting_id):
+    try:
+        result = service.reject_meeting(meeting_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/reminders", methods=["GET"])
+def get_reminders():
+    try:
+        return jsonify({
+            "reminders": service.get_reminders(),
+            "config": service.get_reminder_config()
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/reminders/<reminder_id>/snooze", methods=["POST"])
+def snooze_reminder(reminder_id):
+    data = request.json or {}
+    delay = data.get("delay_minutes", 10)
+    try:
+        result = service.snooze_reminder(reminder_id, delay)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/reminders/<reminder_id>/handle", methods=["POST"])
+def handle_reminder(reminder_id):
+    try:
+        result = service.handle_reminder(reminder_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route("/api/reminders/config", methods=["POST"])
+def update_reminder_config():
+    data = request.json or {}
+    delay = data.get("default_delay_minutes", 15)
+    try:
+        result = service.set_reminder_config(delay)
+        return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 

@@ -16,17 +16,23 @@ class ReviewItem:
     body: str
     state: ReviewState = ReviewState.DRAFT
     reviewer: str | None = None
+    thread_id: str | None = None
+    message_id: str | None = None
 
 
 def create_review_item(
     recipient,
     subject,
-    body
+    body,
+    thread_id=None,
+    message_id=None
 ):
     item = ReviewItem(
         recipient=recipient,
         subject=subject,
-        body=body
+        body=body,
+        thread_id=thread_id,
+        message_id=message_id
     )
     log_action(
         action="create_draft",

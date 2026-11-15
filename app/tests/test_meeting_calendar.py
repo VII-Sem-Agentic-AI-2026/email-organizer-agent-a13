@@ -47,12 +47,16 @@ if meeting_request.meeting_requested:
 
     calendar = GoogleCalendarConnector()
 
-    proposals = get_meeting_proposals(
+    res = get_meeting_proposals(
         meeting_request=meeting_request,
         calendar_connector=calendar,
         start_date=date.today(),
         days=5
     )
+    if isinstance(res, tuple):
+        proposals, requested_status = res
+    else:
+        proposals = res
 
     print(
         "\n========== PROPOSED SLOTS =========="

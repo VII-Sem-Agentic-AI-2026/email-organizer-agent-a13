@@ -18,6 +18,9 @@
         </header>
 
         <main>
+            <!-- High-Priority Reminder Notifications Container -->
+            <div id="reminder-banner-container" class="reminder-banner-container"></div>
+
             <section class="summary-cards" id="metrics-container">
                 <!-- Metrics injected by JS -->
             </section>
@@ -59,6 +62,23 @@
                     <div class="content-scroll" id="meetings-list"></div>
                 </section>
 
+                <section class="panel glass-panel" id="reminders-section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--glass-border); background: rgba(0,0,0,0.2);">
+                        <h2 style="padding: 0; border: none; background: transparent; font-size: 1.15rem; margin: 0;"><span class="icon">🔔</span> Priority Reminders</h2>
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;">
+                            <label for="default-reminder-delay" style="opacity: 0.8; font-size: 0.8rem;">Interval:</label>
+                            <select id="default-reminder-delay" class="input-field" style="width: auto; padding: 4px 8px; font-size: 0.8rem; margin: 0;">
+                                <option value="5">5 mins</option>
+                                <option value="10">10 mins</option>
+                                <option value="15">15 mins</option>
+                                <option value="30">30 mins</option>
+                                <option value="60">1 hour</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="content-scroll" id="reminders-list"></div>
+                </section>
+
                 <section class="panel glass-panel" id="followups-section">
                     <h2><span class="icon">⏰</span> Follow-ups</h2>
                     <div class="content-scroll" id="followups-list"></div>
@@ -88,6 +108,33 @@
             <div class="modal-actions">
                 <button id="save-draft-btn" class="primary-btn">Save</button>
                 <button id="cancel-draft-btn" class="secondary-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Snooze Selection -->
+    <div id="snooze-modal" class="modal">
+        <div class="modal-content glass-panel">
+            <h3>Snooze Reminder</h3>
+            <input type="hidden" id="snooze-reminder-id">
+            <div class="form-group">
+                <label>Choose Snooze Duration</label>
+                <select id="snooze-interval-select" class="input-field">
+                    <option value="5">5 minutes</option>
+                    <option value="10">10 minutes</option>
+                    <option value="15">15 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                    <option value="custom">Custom duration (minutes)...</option>
+                </select>
+            </div>
+            <div class="form-group" id="custom-snooze-group" style="display: none;">
+                <label>Custom Duration in Minutes</label>
+                <input type="number" id="custom-snooze-minutes" class="input-field" min="1" placeholder="e.g. 45">
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-snooze-btn" class="primary-btn">Snooze</button>
+                <button id="cancel-snooze-btn" class="secondary-btn">Cancel</button>
             </div>
         </div>
     </div>

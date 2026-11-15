@@ -1,11 +1,13 @@
 from groq import Groq
 from pydantic import BaseModel
 from typing import Literal
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import os
 import json
 
-load_dotenv()
+# Find .env from this file's directory upward (handles running from app/ or root)
+_dotenv_path = find_dotenv(usecwd=False)
+load_dotenv(dotenv_path=_dotenv_path)
 
 
 # ============================================================

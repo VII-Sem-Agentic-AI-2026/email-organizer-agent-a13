@@ -20,8 +20,8 @@ def test_slot_generation_with_mock_busy_periods():
 
     busy_periods = [
         {
-            "start": "2026-09-10T10:00:00+00:00",
-            "end": "2026-09-10T11:00:00+00:00"
+            "start": "2026-09-10T10:00:00+05:30",
+            "end": "2026-09-10T11:00:00+05:30"
         }
     ]
 
