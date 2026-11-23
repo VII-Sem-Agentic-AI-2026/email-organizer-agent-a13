@@ -230,8 +230,8 @@ def propose_meeting_slots_with_preference(
         req_end = requested_dt + timedelta(minutes=duration_minutes)
 
         is_busy = False
-        # If requested slot is already in the past, treat as unavailable
-        if requested_dt < now_dt:
+        # If requested slot is already in the past on today's date, treat as unavailable
+        if requested_dt < now_dt and start_date >= now_dt.date():
             is_busy = True
         else:
             for busy in busy_periods:
@@ -266,8 +266,8 @@ def propose_meeting_slots_with_preference(
         while current_time + timedelta(minutes=duration_minutes) <= work_end:
             slot_end = current_time + timedelta(minutes=duration_minutes)
 
-            # Skip past slots if looking at today
-            if current_time < now_dt:
+            # Skip past slots if looking at today's date
+            if d == now_dt.date() and current_time < now_dt:
                 current_time += timedelta(minutes=30)
                 continue
 

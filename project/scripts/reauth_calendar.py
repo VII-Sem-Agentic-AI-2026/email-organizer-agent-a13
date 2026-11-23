@@ -4,7 +4,10 @@ Calendar-only re-auth script (ASCII-safe output for Windows cp1252).
 import os
 import sys
 
-APP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app")
+# Ensure app dir is on path
+APP_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
+if not os.path.exists(APP_DIR):
+    APP_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app"))
 sys.path.insert(0, APP_DIR)
 
 from google_auth_oauthlib.flow import InstalledAppFlow

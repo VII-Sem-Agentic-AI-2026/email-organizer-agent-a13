@@ -622,7 +622,7 @@ class DashboardService:
                     clean_err = (
                         "Google Calendar token has insufficient permissions to create events. "
                         "Your token was generated with freebusy-only access. "
-                        "Please run 'python reauth_calendar.py' in your terminal to grant Calendar Event permissions, then restart the dashboard."
+                        "Please run 'python scripts/reauth_calendar.py' in your terminal to grant Calendar Event permissions, then restart the dashboard."
                     )
                     log_action(
                         action="approve_calendar_event_failed",

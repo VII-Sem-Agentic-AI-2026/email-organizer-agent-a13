@@ -488,3 +488,185 @@ def test_12_busy_calendar_event_prevents_available_slot(tmp_path):
     assert len(slots) > 0
     for s in slots:
         assert s.start.hour != 10 or s.start.date() != date(2026, 11, 16)
+
+
+# =========================================================================
+# TEST 13: Approved emails send as direct threaded replies
+# =========================================================================
+def test_13_approved_email_sends_as_threaded_reply():
+    from gmail_sender import GmailSender, send_approved_email
+    from review_queue import ReviewItem, ReviewState
+    import base64
+    from email import message_from_bytes
+
+    mock_service = MagicMock()
+    sender = GmailSender(mock_service)
+
+    item = ReviewItem(
+        recipient="colleague@university.edu",
+        subject="Re: Paper Review",
+        body="I have reviewed the draft.",
+        state=ReviewState.APPROVED,
+        thread_id="thread-xyz-456",
+        message_id="msg-abc-123"
+    )
+
+    send_approved_email(item, sender)
+
+    # 1. messages().send() was called
+    assert mock_service.users().messages().send.called
+    call_args = mock_service.users().messages().send.call_args[1]
+    
+    # 2. threadId was included in Gmail API payload
+    assert call_args["body"].get("threadId") == "thread-xyz-456"
+
+    # 3. RFC 2822 In-Reply-To and References headers were set
+    raw_b64 = call_args["body"]["raw"]
+    msg = message_from_bytes(base64.urlsafe_b64decode(raw_b64))
+    assert msg["In-Reply-To"] == "<msg-abc-123>"
+    assert msg["References"] == "<msg-abc-123>"
+
+
+# =========================================================================
+# TEST 14: Groq API Context-Aware Drafting and Fallback
+# =========================================================================
+def test_14_groq_draft_generation_with_context_and_fallback(monkeypatch):
+    from draft_agent import draft_reply, generate_groq_reply
+
+    test_email = Email(
+        sender="student@university.edu",
+        subject="Question about Assignment 3 Deadline",
+        body="Professor, I was unwell this week. Could I please get a 2-day extension on Assignment 3?"
+    )
+    action_items = [
+        {"description": "Review assignment extension request", "deadline": "Tomorrow"}
+    ]
+
+    # 1. Mock Groq Chat Completion to simulate live Groq API returning a context-aware draft
+    mock_groq_client = MagicMock()
+    mock_completion = MagicMock()
+    mock_choice = MagicMock()
+    mock_choice.message.content = (
+        "Dear Student,\n\n"
+        "I hope you are recovering well. I have received your request regarding Assignment 3 "
+        "and approve a 2-day extension. Please submit your work by [insert date].\n\n"
+        "Best regards,\nFaculty"
+    )
+    mock_completion.choices = [mock_choice]
+    mock_groq_client.chat.completions.create.return_value = mock_completion
+
+    monkeypatch.setattr("draft_agent.get_groq_client", lambda: mock_groq_client)
+
+    groq_result = draft_reply(
+        email=test_email,
+        action_items=action_items,
+        category="Student",
+        priority="Medium"
+    )
+
+    assert groq_result["status"] == "draft"
+    assert groq_result["source"] == "Groq AI"
+    assert "Assignment 3" in groq_result["body"]
+    assert "extension" in groq_result["body"]
+
+    # 2. When Groq client is None or raises an error, falls back to template logic
+    monkeypatch.setattr("draft_agent.get_groq_client", lambda: None)
+
+    fallback_result = draft_reply(
+        email=test_email,
+        action_items=action_items,
+        category="Student",
+        priority="Medium"
+    )
+
+    assert fallback_result["status"] == "draft"
+    assert fallback_result["source"] == "Template"
+    assert "extension" in fallback_result["body"].lower()
+
+    # 3. When neither Groq nor any template matches, falls back to deterministic summary
+    unmatched_email = Email(
+        sender="colleague@random.org",
+        subject="Departmental Budget Ledger",
+        body="Here are the quarterly balance numbers for our financial audit."
+    )
+    unmatched_result = draft_reply(
+        email=unmatched_email,
+        action_items=[{"description": "Check budget allocation", "deadline": "Monday"}],
+        category="Admin",
+        priority="Medium"
+    )
+    assert unmatched_result["source"] == "Fallback"
+    assert "Departmental Budget Ledger" in unmatched_result["body"]
+    assert "Check budget allocation" in unmatched_result["body"]
+
+
+# =========================================================================
+# TEST 15: Option 1 - Meeting approval syncs to Draft Queue without auto-sending
+# =========================================================================
+def test_15_meeting_approval_syncs_to_draft_queue_without_auto_send(tmp_path):
+    mock_cal_connector = MagicMock()
+    mock_cal_connector.create_event.return_value = {
+        "id": "gcal-sync-event-789"
+    }
+    mock_gmail_service = MagicMock()
+
+    service = DashboardService()
+    service.reminder_manager = ReminderManager(db_path=str(tmp_path / "sync_cal.db"))
+    service.calendar_connector = mock_cal_connector
+    service.gmail_connector = MagicMock()
+    service.gmail_connector.service = mock_gmail_service
+
+    # Create meeting proposal linked to a draft in Draft Queue
+    draft_id = "draft-linked-123"
+    initial_draft = create_review_item(
+        recipient="professor@university.edu",
+        subject="Re: Research Collaboration",
+        body="I will review my schedule and confirm.",
+        thread_id="thread-sync-1",
+        message_id="msg-sync-1"
+    )
+    service.drafts[draft_id] = initial_draft
+
+    req = MeetingRequest(
+        meeting_requested=True,
+        proposed_date="2026-11-20",
+        proposed_time="03:00 PM",
+        purpose="Research Collaboration",
+        title="Meeting: Research Collaboration",
+        duration_minutes=30,
+        attendees=["professor@university.edu"],
+        description="Discuss joint NSF grant proposal"
+    )
+    req.id = "meet-sync-test"
+    req.draft_id = draft_id
+    req.sender = "professor@university.edu"
+    req.subject = "Research Collaboration"
+    req.available_slots = ["2026-11-20 03:00 PM — AVAILABLE"]
+    req.status = "pending"
+    service.meetings[req.id] = req
+
+    # 1. User approves the meeting slot in Meeting Requests block
+    res = service.approve_meeting("meet-sync-test", selected_slot="2026-11-20 03:00 PM — AVAILABLE")
+    assert res["success"] is True
+    assert res["status"] == "approved"
+    assert service.meetings["meet-sync-test"].google_event_id == "gcal-sync-event-789"
+
+    # 2. Strict Human-in-the-Loop check: NO email was sent automatically!
+    assert mock_gmail_service.users().messages().send.call_count == 0
+
+    # 3. Draft Queue Sync check: Draft in review queue was updated with confirmed slot details!
+    updated_draft = service.drafts[draft_id]
+    assert updated_draft.version == 2
+    assert "2026-11-20 03:00 PM" in updated_draft.body
+    assert "Research Collaboration" in updated_draft.body or "confirmed" in updated_draft.body.lower()
+
+    # 4. User explicitly reviews and sends draft from Draft Queue
+    service.approve_draft(draft_id, reviewer="Faculty Reviewer")
+    service.send_draft(draft_id)
+
+    # 5. Now email is sent as a threaded reply with user approval!
+    assert mock_gmail_service.users().messages().send.call_count == 1
+    call_args = mock_gmail_service.users().messages().send.call_args[1]
+    assert call_args["body"].get("threadId") == "thread-sync-1"
+
+

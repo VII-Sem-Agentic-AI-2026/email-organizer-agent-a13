@@ -6,7 +6,9 @@ import os
 import sys
 
 # Ensure app dir is on path
-APP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app")
+APP_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
+if not os.path.exists(APP_DIR):
+    APP_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app"))
 sys.path.insert(0, APP_DIR)
 
 from google.auth.transport.requests import Request

@@ -223,7 +223,7 @@ class GoogleCalendarConnector:
                 raise PermissionError(
                     "Google Calendar token has insufficient permissions to create events. "
                     "Your token was created with freebusy-only access. "
-                    "Please run 'python reauth_calendar.py' in your terminal to grant Calendar Event creation permissions, then restart the dashboard."
+                    "Please run 'python scripts/reauth_calendar.py' in your terminal to grant Calendar Event creation permissions, then restart the dashboard."
                 ) from e
             print(f"Error creating calendar event '{title}': {e}")
             raise

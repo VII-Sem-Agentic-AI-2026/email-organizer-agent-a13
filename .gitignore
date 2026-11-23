@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 
@@ -11,11 +12,22 @@ env/
 # Environment variables / secrets
 .env
 .env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
 
-# Google credentials and tokens
+# Google credentials and personal tokens (DO NOT PUSH TO GITHUB)
 credentials.json
 token.json
 calendar_token.json
+**/credentials.json
+**/token.json
+**/calendar_token.json
+
+# Persistent Databases
+*.db
+**/*.db
 
 # IDE
 .vscode/
@@ -30,3 +42,4 @@ Thumbs.db
 
 # Generated/cache files
 .pytest_cache/
+**/.pytest_cache/
