@@ -19,7 +19,7 @@ An autonomous, multi-agent academic assistant that automates inbox triaging, pri
 Academic faculty and professionals face severe inbox overload from mixed incoming messages—ranging from routine student inquiries and administrative deadlines to urgent meeting requests. Manually triaging emails, extracting deadlines, resolving calendar conflicts, and drafting personalized replies is inefficient and prone to missed priorities. Existing chatbots lack autonomous tool execution, calendar awareness, and safe human-in-the-loop controls.
 
 ## 2. Objectives
-- **Autonomous Triage:** Classify sender categories and detect urgency levels (`Critical`, `High`, `Medium`, `Low`).
+- **Autonomous Triage:** Classify sender categories and detect urgency levels.
 - **Action Extraction:** Extract explicit actionable tasks, deadlines, and assignees.
 - **Conflict-Free Scheduling:** Detect meeting requests, query Google Calendar for free/busy blocks, and propose available 30-minute slots.
 - **Context-Aware Drafting:** Generate grounded, professional email replies using Groq LLM without hallucination.
