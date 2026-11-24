@@ -1,0 +1,85 @@
+[
+  {
+    "timestamp": "2026-11-24T01:35:54.041810+00:00",
+    "run_id": "EMAIL-RUN-001",
+    "step_id": "S1",
+    "intent": "Read incoming emails",
+    "action": "read_inbox",
+    "inputs": {},
+    "output": {
+      "emails": [
+        {
+          "id": "E301",
+          "subject": "Project submission extension",
+          "sender": "student@example.com"
+        },
+        {
+          "id": "E302",
+          "subject": "Department report deadline",
+          "sender": "office@example.com"
+        }
+      ],
+      "email_count": 2
+    },
+    "status": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-11-24T01:35:54.042801+00:00",
+    "run_id": "EMAIL-RUN-001",
+    "step_id": "S2",
+    "intent": "Retrieve prior email context",
+    "action": "retrieve_context",
+    "inputs": {
+      "email_id": "E301"
+    },
+    "output": {
+      "prior_reply": "Please share your reason and proposed submission date.",
+      "memory_source": "sample_history"
+    },
+    "status": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-11-24T01:35:54.044558+00:00",
+    "run_id": "EMAIL-RUN-001",
+    "step_id": "S3",
+    "intent": "Prepare a reply draft",
+    "action": "prepare_draft",
+    "inputs": {
+      "email_id": "E301"
+    },
+    "output": {
+      "draft": "Thank you for your email. Please share your proposed submission date.",
+      "requires_human_review": true
+    },
+    "status": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-11-24T01:35:54.069077+00:00",
+    "run_id": "EMAIL-RUN-001",
+    "step_id": "S4",
+    "intent": "Publish approved draft",
+    "action": "publish_draft",
+    "inputs": {
+      "draft_id": "D301"
+    },
+    "output": {
+      "message": "Approval required"
+    },
+    "status": "BLOCKED"
+  },
+  {
+    "timestamp": "2026-11-24T01:35:54.088328+00:00",
+    "run_id": "EMAIL-RUN-001",
+    "step_id": "S4",
+    "intent": "Publish approved draft",
+    "action": "publish_draft",
+    "inputs": {
+      "draft_id": "D301"
+    },
+    "output": {
+      "status": "SIMULATED_PUBLISH",
+      "message": "No email was sent."
+    },
+    "status": "COMPLETED"
+  }
+]

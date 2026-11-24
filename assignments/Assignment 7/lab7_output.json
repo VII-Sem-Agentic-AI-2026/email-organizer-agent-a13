@@ -1,0 +1,61 @@
+{
+  "run_id": "LAB7-DEMO",
+  "emails": [
+    {
+      "id": "E401",
+      "sender": "student@example.com",
+      "subject": "Request for project submission extension",
+      "category": "Student",
+      "type": "Task / Submission",
+      "priority": "Medium",
+      "draft_reply": "Thank you for explaining. Please confirm your proposed submission date for review.",
+      "grounding_evidence": [
+        "Please share your reason and proposed submission date."
+      ]
+    },
+    {
+      "id": "E402",
+      "sender": "office@example.com",
+      "subject": "Urgent: department report deadline",
+      "category": "Administration",
+      "type": "Task / Submission",
+      "priority": "High",
+      "draft_reply": "Thank you for the reminder. The report deadline has been noted.",
+      "grounding_evidence": [
+        "The report format was shared yesterday."
+      ]
+    },
+    {
+      "id": "E403",
+      "sender": "colleague@example.com",
+      "subject": "Meeting request for research discussion",
+      "category": "Colleague",
+      "type": "Meeting Request",
+      "priority": "Medium",
+      "draft_reply": "Thank you. Please share your preferred dates and times so availability can be checked.",
+      "grounding_evidence": []
+    }
+  ],
+  "action_items": [
+    {
+      "email_id": "E401",
+      "task": "Request for project submission extension",
+      "status": "Pending"
+    },
+    {
+      "email_id": "E402",
+      "task": "Urgent: department report deadline",
+      "status": "Pending"
+    }
+  ],
+  "follow_ups": [],
+  "meeting_proposals": [
+    {
+      "email_id": "E403",
+      "request": "Meeting request for research discussion",
+      "proposal": "Check faculty calendar and propose available slots",
+      "status": "Needs faculty confirmation"
+    }
+  ],
+  "validation_passed": true
+}

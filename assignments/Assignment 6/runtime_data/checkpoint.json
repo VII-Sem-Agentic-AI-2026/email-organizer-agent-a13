@@ -1,0 +1,50 @@
+{
+  "run_id": "EMAIL-RUN-001",
+  "next_step": 4,
+  "outputs": [
+    {
+      "step_id": "S1",
+      "action": "read_inbox",
+      "output": {
+        "emails": [
+          {
+            "id": "E301",
+            "subject": "Project submission extension",
+            "sender": "student@example.com"
+          },
+          {
+            "id": "E302",
+            "subject": "Department report deadline",
+            "sender": "office@example.com"
+          }
+        ],
+        "email_count": 2
+      }
+    },
+    {
+      "step_id": "S2",
+      "action": "retrieve_context",
+      "output": {
+        "prior_reply": "Please share your reason and proposed submission date.",
+        "memory_source": "sample_history"
+      }
+    },
+    {
+      "step_id": "S3",
+      "action": "prepare_draft",
+      "output": {
+        "draft": "Thank you for your email. Please share your proposed submission date.",
+        "requires_human_review": true
+      }
+    },
+    {
+      "step_id": "S4",
+      "action": "publish_draft",
+      "output": {
+        "status": "SIMULATED_PUBLISH",
+        "message": "No email was sent."
+      }
+    }
+  ],
+  "status": "COMPLETED"
+}
